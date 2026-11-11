@@ -2,6 +2,7 @@ import tkinter as tk
 from PIL import Image, ImageTk
 from renderer import Renderer
 from scene import Scene
+from math import pi
 
 class App:
     def __init__(self, scene, renderer, win_w = 900, win_h = 900):
@@ -29,12 +30,38 @@ class App:
         self.render()
 
     def on_key(self, event):
-        k = event.keysym
+        k = event.keysym.lower()
 
         if k == '+':
             self.renderer.scale *= 1.1
         elif k == '-':
             self.renderer.scale *= 0.9
+        elif k == "shift_l":
+            self.renderer.perspective = not self.renderer.perspective
+        elif k == "j":
+            self.renderer.yr += pi/6
+        elif k == "l":
+            self.renderer.yr -= pi/6
+        elif k == "i":
+            self.renderer.xr += pi/6
+        elif k == "k":
+            self.renderer.xr -= pi/6
+        elif k == "u":
+            self.renderer.zr += pi/6
+        elif k == "o":
+            self.renderer.zr -= pi/6
+        elif k == "w":
+            self.renderer.z_shift += self.renderer.shift_delta
+        elif k == "s":
+            self.renderer.z_shift -= self.renderer.shift_delta
+        elif k == "a":
+            self.renderer.x_shift += self.renderer.shift_delta
+        elif k == "d":
+            self.renderer.x_shift -= self.renderer.shift_delta
+        elif k == "e":
+            self.renderer.y_shift += self.renderer.shift_delta
+        elif k == "c":
+            self.renderer.y_shift -= self.renderer.shift_delta
         elif k == 'space':
             Image.fromarray(self.renderer.img).save('img.png')
             return 'break'
@@ -75,6 +102,7 @@ class App:
         self.root.mainloop()
 
 if __name__ == '__main__':
-    renderer = Renderer(1000, 1000, 5000, 500, 800)
+    renderer = Renderer(1000, 1000, 3000, 0, -0.05, 0.1, 0.05)
+    renderer.yr = pi
     scene = Scene("bunny.obj")
     App(scene, renderer, 500, 500).run()

@@ -2,14 +2,15 @@ import numpy as np
 from math import floor
 from math import ceil
 from numba import njit
-
+from math import cos
+from math import sin
 
 @njit(cache=True)
-def draw_line(self, px0, py0, px1, py1):  
+def draw_line(img, px0, py0, px1, py1):  
     d_max = max(abs(floor(px1)-floor(px0)), abs(floor(py1)-floor(py0)))
     L = d_max + 1
     if L == 1:
-        self.img[floor(py0), floor(px0)] = 255
+        img[floor(py0), floor(px0)] = 255
         return
 
     dx = (px1 - px0)/(L - 1)
@@ -18,7 +19,7 @@ def draw_line(self, px0, py0, px1, py1):
     x, y = px0, py0
 
     for i in range(L):
-        self.img[floor(y), floor(x)] = 255
+        img[floor(y), floor(x)] = 255
         x += dx
         y += dy
 
@@ -58,14 +59,50 @@ def draw_face(img, z_buf, px0, py0, z0, px1, py1, z1, px2, py2, z2, color):
                     img[y, x] = color
 
 
-def render_model(img, z_buf, scene, scale, x_offset, y_offset):
+@njit(cache=True)
+def render_model(img, z_buf, vertices, faces, scale, x_shift, y_shift, z_shift, xr, yr, zr, perspective):
     img[...] = 0
     z_buf[...] = np.inf
 
-    for f in scene.faces:
-        x0, y0, z0 = scene.vertices[f[0]]
-        x1, y1, z1 = scene.vertices[f[1]]
-        x2, y2, z2 = scene.vertices[f[2]]
+    H = img.shape[0]
+    W = img.shape[1]
+
+    cx = cos(xr)
+    cy = cos(yr)
+    cz = cos(zr)
+    sx = sin(xr)
+    sy = sin(yr)
+    sz = sin(zr)
+    
+    R00 = cy*cz
+    R01 = cy*sz
+    R02 = sy
+    R10 = -cx*sz - sx*sy*cz
+    R11 = cx*cz - sx*sy*sz
+    R12 = sx*cy
+    R20 = sx*sz - cx*sy*cz
+    R21 = -sx*cz - cx*sy*sz
+    R22 = cx*cy
+
+    for f in faces:
+        x0, y0, z0 = vertices[f[0]]
+        x1, y1, z1 = vertices[f[1]]
+        x2, y2, z2 = vertices[f[2]]
+
+        ox, oy, oz = x0, y0, z0
+        x0 = R00*ox + R01*oy + R02*oz + x_shift
+        y0 = R10*ox + R11*oy + R12*oz + y_shift
+        z0 = R20*ox + R21*oy + R22*oz + z_shift
+
+        ox, oy, oz = x1, y1, z1
+        x1 = R00*ox + R01*oy + R02*oz + x_shift
+        y1 = R10*ox + R11*oy + R12*oz + y_shift
+        z1 = R20*ox + R21*oy + R22*oz + z_shift
+
+        ox, oy, oz = x2, y2, z2
+        x2 = R00*ox + R01*oy + R02*oz + x_shift
+        y2 = R10*ox + R11*oy + R12*oz + y_shift
+        z2 = R20*ox + R21*oy + R22*oz + z_shift
 
         # Side vectors
         ux, uy, uz = x1 - x2, y1 - y2, z1 - z2
@@ -79,30 +116,51 @@ def render_model(img, z_buf, scene, scale, x_offset, y_offset):
         # Light
         lx, ly, lz = 0, 0, 1
 
-        cos = (nx*lx + ny*ly + nz*lz) / (np.sqrt(nx*nx + ny*ny + nz*nz) * np.sqrt(lx*lx + ly*ly + lz*lz))
+        cosine = (nx*lx + ny*ly + nz*lz) / (np.sqrt(nx*nx + ny*ny + nz*nz) * np.sqrt(lx*lx + ly*ly + lz*lz))
 
-        px0 = x0 * scale + x_offset
-        px1 = x1 * scale + x_offset
-        px2 = x2 * scale + x_offset
-        py0 = y0 * -scale + y_offset
-        py1 = y1 * -scale + y_offset
-        py2 = y2 * -scale + y_offset
+        if perspective:
+            px0 = x0/z0 * scale + W/2
+            px1 = x1/z1 * scale + W/2
+            px2 = x2/z2 * scale + W/2
+            py0 = y0/z0 * -scale + H/2
+            py1 = y1/z1 * -scale + H/2
+            py2 = y2/z2 * -scale + H/2
+        else:
+            px0 = x0 * scale + W/2
+            px1 = x1 * scale + W/2
+            px2 = x2 * scale + W/2
+            py0 = y0 * -scale + H/2
+            py1 = y1 * -scale + H/2
+            py2 = y2 * -scale + H/2
 
-        color = -255 * cos
-        if cos < 0:
+        color = -255 * cosine
+        if cosine < 0:
             draw_face(img, z_buf, px0, py0, z0, px1, py1, z1, px2, py2, z2, color)
 
 
 class Renderer:
-    def __init__(self, W, H, scale, x_offset, y_offset):
+    def __init__(self, W, H, scale, x_shift, y_shift, z_shift, shift_delta):
         self.W = W
         self.H = H
         self.scale = scale
-        self.x_offset = x_offset
-        self.y_offset = y_offset
+        self.x_shift = x_shift
+        self.y_shift = y_shift
+        self.z_shift = z_shift
+        self.perspective = True
+        self.shift_delta = shift_delta
+
+
         self.img = np.zeros((W, H, 3), dtype = np.uint8)
         self.z_buf = np.full((W, H), np.inf, dtype = np.float32)
 
+        self.xr = 0
+        self.yr = 0
+        self.zr = 0
+
+        
+
 
     def render(self, scene):
-        render_model(self.img, self.z_buf, scene, self.scale, self.x_offset, self.y_offset)
+        render_model(self.img, self.z_buf, scene.vertices, scene.faces,
+                      self.scale, self.x_shift, self.y_shift, self.z_shift,
+                        self.xr, self.yr, self.zr, self.perspective)
